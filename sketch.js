@@ -1,7 +1,5 @@
 // 手描きスペクトル → CIE XYZ → sRGB 表示
-// 白色基準：赤・緑・青 LED の混合白色
-// 横軸：380～780 nm
-// 縦軸：強度 0～1
+// スマホ横向き対応：拡大・縮小・移動・固定ボタン付き
 
 let wlMin = 380;
 let wlMax = 780;
@@ -12,7 +10,10 @@ let whiteRef = [];
 
 let baseW = 1120;
 let baseH = 570;
-let scaleFactor = 1;
+
+let viewScale = 1;
+let panX = 0;
+let panY = 0;
 let sizeLocked = false;
 
 let graphX = 60;
@@ -26,22 +27,22 @@ let xyzScale = 1;
 let prevMouseInside = false;
 let prevX, prevY;
 
+let lastPanX, lastPanY;
+let draggingPan = false;
+let lastMouseX, lastMouseY;
+
 let clearButton;
 let zoomInButton;
 let zoomOutButton;
 let lockButton;
+let resetButton;
 
 function setup() {
-  scaleFactor = min(windowWidth / baseW, windowHeight / baseH);
-  createCanvas(baseW * scaleFactor, baseH * scaleFactor);
-
+  createCanvas(windowWidth, windowHeight);
   textFont("sans-serif");
 
   document.body.style.overflow = "hidden";
   document.body.style.touchAction = "none";
-
-  let canvas = document.querySelector("canvas");
-  canvas.style.touchAction = "none";
 
   for (let i = 0; i < N; i++) {
     spectrum[i] = 0;
@@ -49,46 +50,19 @@ function setup() {
   }
 
   makeRGBLEDWhiteReference();
-
   whiteXYZ = spectrumToXYZ(whiteRef);
   xyzScale = 1.0 / whiteXYZ.Y;
 
-  clearButton = createButton("クリア");
-  clearButton.mousePressed(clearSpectrum);
-  clearButton.touchStarted(() => {
-    clearSpectrum();
-    return false;
-  });
-
-  zoomOutButton = createButton("小さく");
-  zoomOutButton.mousePressed(() => changeScale(0.9));
-  zoomOutButton.touchStarted(() => {
-    changeScale(0.9);
-    return false;
-  });
-
-  zoomInButton = createButton("大きく");
-  zoomInButton.mousePressed(() => changeScale(1.1));
-  zoomInButton.touchStarted(() => {
-    changeScale(1.1);
-    return false;
-  });
-
-  lockButton = createButton("サイズ固定");
-  lockButton.mousePressed(toggleSizeLock);
-  lockButton.touchStarted(() => {
-    toggleSizeLock();
-    return false;
-  });
-
-  updateButtonPositions();
+  makeControlButtons();
+  fitToScreen();
 }
 
 function draw() {
   background(245);
 
   push();
-  scale(scaleFactor);
+  translate(panX, panY);
+  scale(viewScale);
 
   drawGraph();
   drawWhiteReference();
@@ -97,6 +71,98 @@ function draw() {
   drawInstructions();
 
   pop();
+}
+
+function makeControlButtons() {
+  clearButton = createButton("クリア");
+  zoomOutButton = createButton("小さく");
+  zoomInButton = createButton("大きく");
+  lockButton = createButton("サイズ固定");
+  resetButton = createButton("全体表示");
+
+  let buttons = [clearButton, zoomOutButton, zoomInButton, lockButton, resetButton];
+
+  for (let b of buttons) {
+    b.class("controlButton");
+    b.touchStarted(() => false);
+  }
+
+  clearButton.mousePressed(clearSpectrum);
+
+  zoomOutButton.mousePressed(() => {
+    if (!sizeLocked) zoomAtCenter(0.9);
+  });
+
+  zoomInButton.mousePressed(() => {
+    if (!sizeLocked) zoomAtCenter(1.1);
+  });
+
+  lockButton.mousePressed(toggleSizeLock);
+
+  resetButton.mousePressed(() => {
+    if (!sizeLocked) fitToScreen();
+  });
+
+  positionButtons();
+}
+
+function positionButtons() {
+  let y = windowHeight - 46;
+  let x = 12;
+
+  clearButton.position(x, y);
+  x += 76;
+
+  zoomOutButton.position(x, y);
+  x += 76;
+
+  zoomInButton.position(x, y);
+  x += 76;
+
+  lockButton.position(x, y);
+  x += 108;
+
+  resetButton.position(x, y);
+}
+
+function fitToScreen() {
+  let usableH = windowHeight - 56;
+  viewScale = min(windowWidth / baseW, usableH / baseH);
+  viewScale = constrain(viewScale, 0.35, 1.5);
+
+  panX = (windowWidth - baseW * viewScale) / 2;
+  panY = (usableH - baseH * viewScale) / 2;
+}
+
+function zoomAtCenter(rate) {
+  let cx = windowWidth / 2;
+  let cy = (windowHeight - 56) / 2;
+
+  let worldX = (cx - panX) / viewScale;
+  let worldY = (cy - panY) / viewScale;
+
+  viewScale *= rate;
+  viewScale = constrain(viewScale, 0.35, 2.5);
+
+  panX = cx - worldX * viewScale;
+  panY = cy - worldY * viewScale;
+}
+
+function toggleSizeLock() {
+  sizeLocked = !sizeLocked;
+
+  if (sizeLocked) {
+    lockButton.html("固定解除");
+  } else {
+    lockButton.html("サイズ固定");
+  }
+}
+
+function screenToWorld(x, y) {
+  return {
+    x: (x - panX) / viewScale,
+    y: (y - panY) / viewScale
+  };
 }
 
 function drawGraph() {
@@ -192,49 +258,79 @@ function drawColorResult() {
   text("XYZ→sRGB 変換", 860, 388);
   text("sRGB ガンマ補正込み", 860, 411);
   text("W キー：RGB LED 白色を入力", 860, 450);
+  text("表示倍率：" + nf(viewScale, 1, 2), 860, 480);
 
-  text("表示サイズ：" + nf(scaleFactor, 1, 2), 860, 480);
+  if (sizeLocked) {
+    text("固定中：移動・拡大縮小なし", 860, 505);
+  } else {
+    text("固定解除中：背景ドラッグで移動", 860, 505);
+  }
 }
 
 function drawInstructions() {
   noStroke();
   fill(0);
   textSize(14);
-  text("マウスドラッグ／指でドラッグ：スペクトルを描く", 60, 540);
-  text("W キー：RGB LED 白色スペクトルを自動入力", 460, 540);
+  text("グラフ内をドラッグ：スペクトルを描く", 60, 540);
+  text("グラフ外をドラッグ：表示位置を移動", 330, 540);
+}
+
+function mousePressed() {
+  let p = screenToWorld(mouseX, mouseY);
+
+  let insideGraph =
+    p.x >= graphX &&
+    p.x <= graphX + graphW &&
+    p.y >= graphY &&
+    p.y <= graphY + graphH;
+
+  if (!insideGraph && !sizeLocked) {
+    draggingPan = true;
+    lastMouseX = mouseX;
+    lastMouseY = mouseY;
+  }
+
+  prevMouseInside = false;
 }
 
 function mouseDragged() {
-  let x = mouseX / scaleFactor;
-  let y = mouseY / scaleFactor;
+  let p = screenToWorld(mouseX, mouseY);
 
-  let inside =
-    x >= graphX &&
-    x <= graphX + graphW &&
-    y >= graphY &&
-    y <= graphY + graphH;
+  let insideGraph =
+    p.x >= graphX &&
+    p.x <= graphX + graphW &&
+    p.y >= graphY &&
+    p.y <= graphY + graphH;
 
-  if (inside) {
+  if (insideGraph) {
     if (prevMouseInside) {
-      drawSpectrumLine(prevX, prevY, x, y);
+      drawSpectrumLine(prevX, prevY, p.x, p.y);
     } else {
-      setSpectrumFromMouse(x, y);
+      setSpectrumFromMouse(p.x, p.y);
     }
 
-    prevX = x;
-    prevY = y;
+    prevX = p.x;
+    prevY = p.y;
     prevMouseInside = true;
-  } else {
+    draggingPan = false;
+  } else if (draggingPan && !sizeLocked) {
+    panX += mouseX - lastMouseX;
+    panY += mouseY - lastMouseY;
+
+    lastMouseX = mouseX;
+    lastMouseY = mouseY;
+
     prevMouseInside = false;
   }
 }
 
 function mouseReleased() {
   prevMouseInside = false;
+  draggingPan = false;
 }
 
 function touchStarted() {
-  prevMouseInside = false;
+  mousePressed();
   return false;
 }
 
@@ -244,7 +340,7 @@ function touchMoved() {
 }
 
 function touchEnded() {
-  prevMouseInside = false;
+  mouseReleased();
   return false;
 }
 
@@ -294,45 +390,12 @@ function clearSpectrum() {
   }
 }
 
-function changeScale(rate) {
-  if (sizeLocked) return;
-
-  scaleFactor *= rate;
-  scaleFactor = constrain(scaleFactor, 0.45, 1.2);
-
-  resizeCanvas(baseW * scaleFactor, baseH * scaleFactor);
-  updateButtonPositions();
-}
-
-function toggleSizeLock() {
-  sizeLocked = !sizeLocked;
-
-  if (sizeLocked) {
-    lockButton.html("固定解除");
-  } else {
-    lockButton.html("サイズ固定");
-  }
-}
-
-function updateButtonPositions() {
-  clearButton.position(860 * scaleFactor, 500 * scaleFactor);
-  clearButton.size(90 * scaleFactor, 36 * scaleFactor);
-
-  zoomOutButton.position(960 * scaleFactor, 500 * scaleFactor);
-  zoomOutButton.size(70 * scaleFactor, 36 * scaleFactor);
-
-  zoomInButton.position(1040 * scaleFactor, 500 * scaleFactor);
-  zoomInButton.size(70 * scaleFactor, 36 * scaleFactor);
-
-  lockButton.position(860 * scaleFactor, 540 * scaleFactor);
-  lockButton.size(120 * scaleFactor, 30 * scaleFactor);
-}
-
 function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  positionButtons();
+
   if (!sizeLocked) {
-    scaleFactor = min(windowWidth / baseW, windowHeight / baseH);
-    resizeCanvas(baseW * scaleFactor, baseH * scaleFactor);
-    updateButtonPositions();
+    fitToScreen();
   }
 }
 
@@ -400,11 +463,7 @@ function spectrumToXYZ(sp) {
     Z += sp[i] * cmf.z;
   }
 
-  return {
-    X: X,
-    Y: Y,
-    Z: Z
-  };
+  return { X: X, Y: Y, Z: Z };
 }
 
 function cie1931Approx(wl) {
