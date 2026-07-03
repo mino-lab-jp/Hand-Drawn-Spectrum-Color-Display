@@ -80,32 +80,40 @@ function makeControlButtons() {
   lockButton = createButton("サイズ固定");
   resetButton = createButton("全体表示");
 
-  let buttons = [clearButton, zoomOutButton, zoomInButton, lockButton, resetButton];
+  setupButton(clearButton, clearSpectrum);
 
-  for (let b of buttons) {
-    b.class("controlButton");
-    b.touchStarted(() => false);
-  }
-
-  clearButton.mousePressed(clearSpectrum);
-
-  zoomOutButton.mousePressed(() => {
+  setupButton(zoomOutButton, () => {
     if (!sizeLocked) zoomAtCenter(0.9);
   });
 
-  zoomInButton.mousePressed(() => {
+  setupButton(zoomInButton, () => {
     if (!sizeLocked) zoomAtCenter(1.1);
   });
 
-  lockButton.mousePressed(toggleSizeLock);
+  setupButton(lockButton, toggleSizeLock);
 
-  resetButton.mousePressed(() => {
+  setupButton(resetButton, () => {
     if (!sizeLocked) fitToScreen();
   });
 
   positionButtons();
 }
 
+function setupButton(button, action) {
+  button.class("controlButton");
+
+  button.mousePressed(action);
+
+  button.elt.addEventListener(
+    "touchstart",
+    function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      action();
+    },
+    { passive: false }
+  );
+}
 function positionButtons() {
   let y = windowHeight - 46;
   let x = 12;
