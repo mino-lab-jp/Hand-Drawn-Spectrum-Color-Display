@@ -1,120 +1,308 @@
-let wlSlider;
-
+// 手描きスペクトル → CIE XYZ → sRGB 表示
+// 白色基準：赤・緑・青 LED の混合白色
+// 横軸：380～780 nm
+// 縦軸：強度 0～1
+let wlMin = 380;
+let wlMax = 780;
+let N = 401;
+let spectrum = [];
+let whiteRef = [];
+let graphX = 60;
+let graphY = 60;
+let graphW = 760;
+let graphH = 420;
+let whiteXYZ;
+let xyzScale = 1;
+let prevMouseInside = false;
+let prevX, prevY;
 function setup() {
-  createCanvas(1000, 260);
-  textFont('sans-serif');
-
-  wlSlider = createSlider(380, 780, 550, 1);
-  wlSlider.position(80, 210);
-  wlSlider.style('width', '840px');
+ createCanvas(1120, 570);
+ textFont("sans-serif");
+ for (let i = 0; i < N; i++) {
+ spectrum[i] = 0;
+ whiteRef[i] = 0;
+ }
+ makeRGBLEDWhiteReference();
+ whiteXYZ = spectrumToXYZ(whiteRef);
+ xyzScale = 1.0 / whiteXYZ.Y; // 白色基準を Y=1 にする
 }
-
 function draw() {
-  background(245);
-
-  fill(0);
-  noStroke();
-  textSize(20);
-  text("380 nm ～ 780 nm 可視光スペクトル", 30, 30);
-
-  // スペクトル帯の表示領域
-  let x0 = 50;
-  let y0 = 60;
-  let w = 900;
-  let h = 80;
-
-  // スペクトル描画
-  for (let i = 0; i < w; i++) {
-    let wl = map(i, 0, w - 1, 380, 780);
-    let c = wavelengthToRGB(wl);
-    stroke(c[0], c[1], c[2]);
-    line(x0 + i, y0, x0 + i, y0 + h);
-  }
-
-  // 目盛り
-  stroke(0);
-  fill(0);
-  textSize(12);
-  for (let wl = 380; wl <= 780; wl += 50) {
-    let x = map(wl, 380, 780, x0, x0 + w);
-    line(x, y0 + h, x, y0 + h + 8);
-    noStroke();
-    textAlign(CENTER);
-    text(wl, x, y0 + h + 22);
-    stroke(0);
-  }
-
-  // 選択波長
-  let selectedWl = wlSlider.value();
-  let xSel = map(selectedWl, 380, 780, x0, x0 + w);
-  let cSel = wavelengthToRGB(selectedWl);
-
-  stroke(0);
-  strokeWeight(2);
-  line(xSel, y0 - 10, xSel, y0 + h + 10);
-  strokeWeight(1);
-
-  fill(cSel[0], cSel[1], cSel[2]);
-  rect(420, 165, 160, 30);
-
-  fill(0);
-  noStroke();
-  textAlign(LEFT);
-  textSize(16);
-  text("選択波長: " + selectedWl + " nm", 50, 185);
-
-  textSize(14);
-  text("対応色", 590, 185);
+ background(245);
+ drawGraph();
+ drawWhiteReference();
+ drawSpectrumCurve();
+ drawColorResult();
+ drawInstructions();
 }
-
-// 波長[nm] → RGB
-function wavelengthToRGB(wavelength) {
-  let R = 0, G = 0, B = 0;
-
-  if (wavelength >= 380 && wavelength < 440) {
-    R = -(wavelength - 440) / (440 - 380);
-    G = 0;
-    B = 1;
-  } else if (wavelength >= 440 && wavelength < 490) {
-    R = 0;
-    G = (wavelength - 440) / (490 - 440);
-    B = 1;
-  } else if (wavelength >= 490 && wavelength < 510) {
-    R = 0;
-    G = 1;
-    B = -(wavelength - 510) / (510 - 490);
-  } else if (wavelength >= 510 && wavelength < 580) {
-    R = (wavelength - 510) / (580 - 510);
-    G = 1;
-    B = 0;
-  } else if (wavelength >= 580 && wavelength < 645) {
-    R = 1;
-    G = -(wavelength - 645) / (645 - 580);
-    B = 0;
-  } else if (wavelength >= 645 && wavelength <= 780) {
-    R = 1;
-    G = 0;
-    B = 0;
-  }
-
-  // 端の暗さ補正
-  let factor = 0;
-  if (wavelength >= 380 && wavelength < 420) {
-    factor = 0.3 + 0.7 * (wavelength - 380) / (420 - 380);
-  } else if (wavelength >= 420 && wavelength <= 700) {
-    factor = 1.0;
-  } else if (wavelength > 700 && wavelength <= 780) {
-    factor = 0.3 + 0.7 * (780 - wavelength) / (780 - 700);
-  } else {
-    factor = 0.0;
-  }
-
-  let gamma = 0.8;
-  let maxIntensity = 255;
-
-  let r = R === 0 ? 0 : Math.round(maxIntensity * Math.pow(R * factor, gamma));
-  let g = G === 0 ? 0 : Math.round(maxIntensity * Math.pow(G * factor, gamma));
-  let b = B === 0 ? 0 : Math.round(maxIntensity * Math.pow(B * factor, gamma));
-
-  return [r, g, b];
+function drawGraph() {
+ fill(255);
+ stroke(0);
+ rect(graphX, graphY, graphW, graphH);
+ noStroke();
+ fill(0);
+ textSize(14);
+ text("波⾧ λ [nm]", graphX + graphW / 2 - 40, graphY + graphH + 45);
+ text("強度", graphX - 45, graphY - 20);
+ for (let wl = 400; wl <= 780; wl += 50) {
+ let x = map(wl, wlMin, wlMax, graphX, graphX + graphW);
+ stroke(225);
+ line(x, graphY, x, graphY + graphH);
+ noStroke();
+ fill(0);
+ text(wl, x - 15, graphY + graphH + 22);
+ }
+ for (let v = 0; v <= 1.0; v += 0.2) {
+ let y = map(v, 0, 1, graphY + graphH, graphY);
+ stroke(225);
+ line(graphX, y, graphX + graphW, y);
+ noStroke();
+ fill(0);
+ text(v.toFixed(1), graphX - 35, y + 5);
+ }
 }
+function drawWhiteReference() {
+ noFill();
+ stroke(150);
+ strokeWeight(2);
+ drawingContext.setLineDash([8, 6]);
+ beginShape();
+ for (let i = 0; i < N; i++) {
+ let wl = wlMin + i;
+ let x = map(wl, wlMin, wlMax, graphX, graphX + graphW);
+ let y = map(whiteRef[i], 0, 1, graphY + graphH, graphY);
+ vertex(x, y);
+ }
+ endShape();
+ drawingContext.setLineDash([]);
+ strokeWeight(1);
+ noStroke();
+ fill(90);
+ textSize(13);
+ text("灰色点線：RGB LED 混合による白色スペクトル", graphX + 405, graphY + 22);
+}
+function drawSpectrumCurve() {
+ noFill();
+ stroke(20, 80, 220);
+ strokeWeight(3);
+ beginShape();
+ for (let i = 0; i < N; i++) {
+ let wl = wlMin + i;
+ let x = map(wl, wlMin, wlMax, graphX, graphX + graphW);
+ let y = map(spectrum[i], 0, 1, graphY + graphH, graphY);
+ vertex(x, y);
+ }
+ endShape();
+ strokeWeight(1);
+}
+function drawColorResult() {
+ let rgb = spectrumToSRGB(spectrum);
+ noStroke();
+ fill(0);
+ textSize(18);
+ text("CIE XYZ → sRGB 表示色", 860, 80);
+ fill(rgb.r, rgb.g, rgb.b);
+ stroke(0);
+ rect(860, 110, 190, 190);
+ noStroke();
+ fill(0);
+ textSize(15);
+ text("RGB = (" + round(rgb.r) + ", " + round(rgb.g) + ", " + round(rgb.b) + ")", 860,
+330);
+ text("CIE 1931 等色関数近似", 860, 365);
+ text("XYZ→sRGB 変換", 860, 388);
+ text("sRGB ガンマ補正込み", 860, 411);
+ text("W キー：RGB LED 白色を入力", 860, 450);
+}
+function drawInstructions() {
+ noStroke();
+ fill(0);
+ textSize(14);
+ text("マウスドラッグ：スペクトルを描く", 60, 540);
+ text("C キー：クリア", 330, 540);
+ text("W キー：RGB LED 白色スペクトルを自動入力", 460, 540);
+}
+function mouseDragged() {
+ let inside =
+ mouseX >= graphX &&
+ mouseX <= graphX + graphW &&
+ mouseY >= graphY &&
+ mouseY <= graphY + graphH;
+ if (inside) {
+ if (prevMouseInside) {
+ drawSpectrumLine(prevX, prevY, mouseX, mouseY);
+ } else {
+ setSpectrumFromMouse(mouseX, mouseY);
+ }
+ prevX = mouseX;
+ prevY = mouseY;
+ prevMouseInside = true;
+ } else {
+ prevMouseInside = false;
+ }
+}
+function mouseReleased() {
+ prevMouseInside = false;
+}
+function drawSpectrumLine(x1, y1, x2, y2) {
+ let steps = int(dist(x1, y1, x2, y2) / 2) + 1;
+ for (let s = 0; s <= steps; s++) {
+ let x = lerp(x1, x2, s / steps);
+ let y = lerp(y1, y2, s / steps);
+ setSpectrumFromMouse(x, y);
+ }
+}
+function setSpectrumFromMouse(x, y) {
+ let wl = map(x, graphX, graphX + graphW, wlMin, wlMax);
+ let intensity = map(y, graphY + graphH, graphY, 0, 1);
+ intensity = constrain(intensity, 0, 1);
+ let index = round(wl - wlMin);
+ index = constrain(index, 0, N - 1);
+ for (let k = -3; k <= 3; k++) {
+ let j = index + k;
+ if (j >= 0 && j < N) {
+ let weight = 1 - abs(k) / 4;
+ spectrum[j] = max(spectrum[j], intensity * weight);
+ }
+ }
+}
+function keyPressed() {
+ if (key === "c" || key === "C") {
+ for (let i = 0; i < N; i++) spectrum[i] = 0;
+ }
+ if (key === "w" || key === "W") {
+ for (let i = 0; i < N; i++) spectrum[i] = whiteRef[i];
+ }
+}
+// RGB LED による白色基準スペクトル
+function makeRGBLEDWhiteReference() {
+ let red = [];
+ let green = [];
+ let blue = [];
+ for (let i = 0; i < N; i++) {
+ let wl = wlMin + i;
+ blue[i] = gaussian(wl, 447, 16);
+ green[i] = gaussian(wl, 540, 24);
+ red[i] = gaussian(wl, 635, 20);
+ }
+ let XB = spectrumToXYZ(blue);
+ let XG = spectrumToXYZ(green);
+ let XR = spectrumToXYZ(red);
+ // D65 白色点を目標にする
+ let target = { X: 0.95047, Y: 1.00000, Z: 1.08883 };
+ let weights = solve3x3(
+ XR.X, XG.X, XB.X,
+ XR.Y, XG.Y, XB.Y,
+ XR.Z, XG.Z, XB.Z,
+ target.X, target.Y, target.Z
+ );
+ let wr = max(0, weights[0]);
+ let wg = max(0, weights[1]);
+ let wb = max(0, weights[2]);
+ for (let i = 0; i < N; i++) {
+ whiteRef[i] = wr * red[i] + wg * green[i] + wb * blue[i];
+ }
+ // 縦軸で切れないよう、最大値を 0.9 にそろえる
+ let m = max(whiteRef);
+ for (let i = 0; i < N; i++) {
+ whiteRef[i] = whiteRef[i] / m * 0.9;
+ }
+}
+function gaussian(x, mu, sigma) {
+ return exp(-sq(x - mu) / (2 * sigma * sigma));
+}
+// スペクトル → XYZ
+function spectrumToXYZ(sp) {
+ let X = 0;
+ let Y = 0;
+ let Z = 0;
+ for (let i = 0; i < N; i++) {
+ let wl = wlMin + i;
+ let cmf = cie1931Approx(wl);
+ X += sp[i] * cmf.x;
+ Y += sp[i] * cmf.y;
+ Z += sp[i] * cmf.z;
+ }
+ return { X: X, Y: Y, Z: Z };
+}
+// CIE 1931 2 度視野 等色関数の近似式
+function cie1931Approx(wl) {
+ let x =
+ 1.056 * asymmetricGaussian(wl, 599.8, 37.9, 31.0) +
+ 0.362 * asymmetricGaussian(wl, 442.0, 16.0, 26.7) -
+ 0.065 * asymmetricGaussian(wl, 501.1, 20.4, 26.2);
+ let y =
+ 0.821 * asymmetricGaussian(wl, 568.8, 46.9, 40.5) +
+ 0.286 * asymmetricGaussian(wl, 530.9, 16.3, 31.1);
+ let z =
+ 1.217 * asymmetricGaussian(wl, 437.0, 11.8, 36.0) +
+ 0.681 * asymmetricGaussian(wl, 459.0, 26.0, 13.8);
+ return {
+ x: max(0, x),
+ y: max(0, y),
+ z: max(0, z)
+ };
+}
+function asymmetricGaussian(wl, mu, sigma1, sigma2) {
+ let sigma = wl < mu ? sigma1 : sigma2;
+ return exp(-0.5 * sq((wl - mu) / sigma));
+}
+// XYZ → sRGB
+function spectrumToSRGB(sp) {
+ let xyz = spectrumToXYZ(sp);
+ let X = xyz.X * xyzScale;
+ let Y = xyz.Y * xyzScale;
+ let Z = xyz.Z * xyzScale;
+ // XYZ → linear sRGB
+ let rLin = 3.2406 * X - 1.5372 * Y - 0.4986 * Z;
+ let gLin = -0.9689 * X + 1.8758 * Y + 0.0415 * Z;
+ let bLin = 0.0557 * X - 0.2040 * Y + 1.0570 * Z;
+ rLin = max(0, rLin);
+ gLin = max(0, gLin);
+ bLin = max(0, bLin);
+ // 1 を超える場合だけ圧縮
+ let m = max(rLin, gLin, bLin);
+ if (m > 1) {
+ rLin /= m;
+ gLin /= m;
+ bLin /= m;
+ }
+ return {
+ r: 255 * gammaCorrect(rLin),
+ g: 255 * gammaCorrect(gLin),
+ b: 255 * gammaCorrect(bLin)
+ };
+}
+// sRGB ガンマ補正
+function gammaCorrect(c) {
+ c = constrain(c, 0, 1);
+ if (c <= 0.0031308) {
+ return 12.92 * c;
+ } else {
+ return 1.055 * pow(c, 1 / 2.4) - 0.055;
+ }
+}
+// 3 元連立方程式を解く
+function solve3x3(
+ a11, a12, a13,
+ a21, a22, a23,
+ a31, a32, a33,
+ b1, b2, b3
+) {
+ let det =
+ a11 * (a22 * a33 - a23 * a32) -
+ a12 * (a21 * a33 - a23 * a31) +
+ a13 * (a21 * a32 - a22 * a31);
+ let dx =
+ b1 * (a22 * a33 - a23 * a32) -
+ a12 * (b2 * a33 - a23 * b3) +
+ a13 * (b2 * a32 - a22 * b3);
+ let dy =
+ a11 * (b2 * a33 - a23 * b3) -
+ b1 * (a21 * a33 - a23 * a31) +
+ a13 * (a21 * b3 - b2 * a31);
+ let dz =
+ a11 * (a22 * b3 - b2 * a32) -
+ a12 * (a21 * b3 - b2 * a31) +
+ b1 * (a21 * a32 - a22 * a31);
+ return [dx / det, dy / det, dz / det];
+} 
