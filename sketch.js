@@ -10,6 +10,11 @@ let N = 401;
 let spectrum = [];
 let whiteRef = [];
 
+let baseW = 1120;
+let baseH = 570;
+let scaleFactor = 1;
+let sizeLocked = false;
+
 let graphX = 60;
 let graphY = 60;
 let graphW = 760;
@@ -22,12 +27,19 @@ let prevMouseInside = false;
 let prevX, prevY;
 
 let clearButton;
+let zoomInButton;
+let zoomOutButton;
+let lockButton;
 
 function setup() {
-  createCanvas(1120, 570);
+  scaleFactor = min(windowWidth / baseW, windowHeight / baseH);
+  createCanvas(baseW * scaleFactor, baseH * scaleFactor);
+
   textFont("sans-serif");
 
-  // スマホで画面がスクロール・ズームしないようにする
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+
   let canvas = document.querySelector("canvas");
   canvas.style.touchAction = "none";
 
@@ -39,27 +51,52 @@ function setup() {
   makeRGBLEDWhiteReference();
 
   whiteXYZ = spectrumToXYZ(whiteRef);
-  xyzScale = 1.0 / whiteXYZ.Y; // 白色基準を Y=1 にする
+  xyzScale = 1.0 / whiteXYZ.Y;
 
-  // クリアボタン
   clearButton = createButton("クリア");
-  clearButton.position(860, 500);
-  clearButton.size(90, 36);
   clearButton.mousePressed(clearSpectrum);
   clearButton.touchStarted(() => {
     clearSpectrum();
     return false;
   });
+
+  zoomOutButton = createButton("小さく");
+  zoomOutButton.mousePressed(() => changeScale(0.9));
+  zoomOutButton.touchStarted(() => {
+    changeScale(0.9);
+    return false;
+  });
+
+  zoomInButton = createButton("大きく");
+  zoomInButton.mousePressed(() => changeScale(1.1));
+  zoomInButton.touchStarted(() => {
+    changeScale(1.1);
+    return false;
+  });
+
+  lockButton = createButton("サイズ固定");
+  lockButton.mousePressed(toggleSizeLock);
+  lockButton.touchStarted(() => {
+    toggleSizeLock();
+    return false;
+  });
+
+  updateButtonPositions();
 }
 
 function draw() {
   background(245);
+
+  push();
+  scale(scaleFactor);
 
   drawGraph();
   drawWhiteReference();
   drawSpectrumCurve();
   drawColorResult();
   drawInstructions();
+
+  pop();
 }
 
 function drawGraph() {
@@ -155,6 +192,8 @@ function drawColorResult() {
   text("XYZ→sRGB 変換", 860, 388);
   text("sRGB ガンマ補正込み", 860, 411);
   text("W キー：RGB LED 白色を入力", 860, 450);
+
+  text("表示サイズ：" + nf(scaleFactor, 1, 2), 860, 480);
 }
 
 function drawInstructions() {
@@ -166,21 +205,24 @@ function drawInstructions() {
 }
 
 function mouseDragged() {
+  let x = mouseX / scaleFactor;
+  let y = mouseY / scaleFactor;
+
   let inside =
-    mouseX >= graphX &&
-    mouseX <= graphX + graphW &&
-    mouseY >= graphY &&
-    mouseY <= graphY + graphH;
+    x >= graphX &&
+    x <= graphX + graphW &&
+    y >= graphY &&
+    y <= graphY + graphH;
 
   if (inside) {
     if (prevMouseInside) {
-      drawSpectrumLine(prevX, prevY, mouseX, mouseY);
+      drawSpectrumLine(prevX, prevY, x, y);
     } else {
-      setSpectrumFromMouse(mouseX, mouseY);
+      setSpectrumFromMouse(x, y);
     }
 
-    prevX = mouseX;
-    prevY = mouseY;
+    prevX = x;
+    prevY = y;
     prevMouseInside = true;
   } else {
     prevMouseInside = false;
@@ -252,6 +294,48 @@ function clearSpectrum() {
   }
 }
 
+function changeScale(rate) {
+  if (sizeLocked) return;
+
+  scaleFactor *= rate;
+  scaleFactor = constrain(scaleFactor, 0.45, 1.2);
+
+  resizeCanvas(baseW * scaleFactor, baseH * scaleFactor);
+  updateButtonPositions();
+}
+
+function toggleSizeLock() {
+  sizeLocked = !sizeLocked;
+
+  if (sizeLocked) {
+    lockButton.html("固定解除");
+  } else {
+    lockButton.html("サイズ固定");
+  }
+}
+
+function updateButtonPositions() {
+  clearButton.position(860 * scaleFactor, 500 * scaleFactor);
+  clearButton.size(90 * scaleFactor, 36 * scaleFactor);
+
+  zoomOutButton.position(960 * scaleFactor, 500 * scaleFactor);
+  zoomOutButton.size(70 * scaleFactor, 36 * scaleFactor);
+
+  zoomInButton.position(1040 * scaleFactor, 500 * scaleFactor);
+  zoomInButton.size(70 * scaleFactor, 36 * scaleFactor);
+
+  lockButton.position(860 * scaleFactor, 540 * scaleFactor);
+  lockButton.size(120 * scaleFactor, 30 * scaleFactor);
+}
+
+function windowResized() {
+  if (!sizeLocked) {
+    scaleFactor = min(windowWidth / baseW, windowHeight / baseH);
+    resizeCanvas(baseW * scaleFactor, baseH * scaleFactor);
+    updateButtonPositions();
+  }
+}
+
 // RGB LED による白色基準スペクトル
 function makeRGBLEDWhiteReference() {
   let red = [];
@@ -270,7 +354,6 @@ function makeRGBLEDWhiteReference() {
   let XG = spectrumToXYZ(green);
   let XR = spectrumToXYZ(red);
 
-  // D65 白色点を目標にする
   let target = {
     X: 0.95047,
     Y: 1.00000,
@@ -292,7 +375,6 @@ function makeRGBLEDWhiteReference() {
     whiteRef[i] = wr * red[i] + wg * green[i] + wb * blue[i];
   }
 
-  // 縦軸で切れないよう、最大値を 0.9 にそろえる
   let m = max(whiteRef);
 
   for (let i = 0; i < N; i++) {
@@ -304,7 +386,6 @@ function gaussian(x, mu, sigma) {
   return exp(-sq(x - mu) / (2 * sigma * sigma));
 }
 
-// スペクトル → XYZ
 function spectrumToXYZ(sp) {
   let X = 0;
   let Y = 0;
@@ -326,7 +407,6 @@ function spectrumToXYZ(sp) {
   };
 }
 
-// CIE 1931 2度視野 等色関数の近似式
 function cie1931Approx(wl) {
   let x =
     1.056 * asymmetricGaussian(wl, 599.8, 37.9, 31.0) +
@@ -353,7 +433,6 @@ function asymmetricGaussian(wl, mu, sigma1, sigma2) {
   return exp(-0.5 * sq((wl - mu) / sigma));
 }
 
-// XYZ → sRGB
 function spectrumToSRGB(sp) {
   let xyz = spectrumToXYZ(sp);
 
@@ -361,7 +440,6 @@ function spectrumToSRGB(sp) {
   let Y = xyz.Y * xyzScale;
   let Z = xyz.Z * xyzScale;
 
-  // XYZ → linear sRGB
   let rLin = 3.2406 * X - 1.5372 * Y - 0.4986 * Z;
   let gLin = -0.9689 * X + 1.8758 * Y + 0.0415 * Z;
   let bLin = 0.0557 * X - 0.2040 * Y + 1.0570 * Z;
@@ -370,7 +448,6 @@ function spectrumToSRGB(sp) {
   gLin = max(0, gLin);
   bLin = max(0, bLin);
 
-  // 1 を超える場合だけ圧縮
   let m = max(rLin, gLin, bLin);
 
   if (m > 1) {
@@ -386,7 +463,6 @@ function spectrumToSRGB(sp) {
   };
 }
 
-// sRGB ガンマ補正
 function gammaCorrect(c) {
   c = constrain(c, 0, 1);
 
@@ -397,7 +473,6 @@ function gammaCorrect(c) {
   }
 }
 
-// 3元連立方程式を解く
 function solve3x3(
   a11, a12, a13,
   a21, a22, a23,
